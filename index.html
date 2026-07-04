@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
+/* --hud-fade はJS初期化時に TX_HUD_FADE_MS で上書きされる。値の変更はJS側で行うこと（下記はJS実行前のフォールバック） */
 :root { --hud-fade: 600ms; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; }
@@ -20,10 +21,13 @@ body { background: #000; overflow: hidden; }
   position: absolute; top: 0; left: 0;
   transform-origin: top left;
 }
-#hs {
-  position: absolute; top: 12px; left: 16px;
-  font-size: 20px; letter-spacing: 2px;
+#hs, #sc {
+  position: absolute; top: 12px;
+  font-size: 20px;
   text-shadow: 1px 1px 3px #000;
+}
+#hs {
+  left: 16px; letter-spacing: 2px;
   transition: color 0.3s;
 }
 #hs.new-record {
@@ -31,9 +35,7 @@ body { background: #000; overflow: hidden; }
   text-shadow: 0 0 12px rgba(255,220,0,0.9), 1px 1px 3px #000;
 }
 #sc {
-  position: absolute; top: 12px; right: 16px;
-  font-size: 20px; letter-spacing: 1px;
-  text-shadow: 1px 1px 3px #000;
+  right: 16px; letter-spacing: 1px;
 }
 .fade {
   text-align: center; display: none; opacity: 0;
@@ -170,6 +172,10 @@ const PLAYER_BTN_NUM = 3;
 const PLAYER_BTN_STEP_RAD = degToRad(20);
 const PLAYER_BTN_ARC_FACTOR = 0.84;
 const PLAYER_BTN_ARC_R = PLAYER_RADIUS * PLAYER_BTN_ARC_FACTOR;
+const PLAYER_BTN_HALF_SPAN = PLAYER_BTN_STEP_RAD * (PLAYER_BTN_NUM - 1) / 2;
+const PLAYER_HEAD_R = PLAYER_RADIUS * PLAYER_HEAD_R_FACTOR;
+const PLAYER_HEAD_Y = PLAYER_RADIUS * PLAYER_HEAD_Y_FACTOR;
+const PLAYER_EYE_R = PLAYER_RADIUS * PLAYER_EYE_R_FACTOR;
 
 const SPIKE_NUM = 4;
 const SPIKE_SPEED = 0.015;
@@ -187,6 +193,7 @@ const SPIKE_MAX_GAP = 20;
 const SPIKE_Y = -PLAYER_RADIUS;
 const SPIKE_INIT_X = 20;
 const SPIKE_INIT_OFS = 2;
+const COLLISION_DIST_SQ = (SPIKE_RADIUS + PLAYER_RADIUS) ** 2;
 
 const STAR_NUM = 50;
 const STAR_RADIUS = 0.1;
@@ -286,12 +293,6 @@ const CONE_HEIGHT_SEG = 3;
 const SCENE = Object.freeze({ TITLE: 'title', PLAY: 'play' });
 const TX_STATE = Object.freeze({ IDLE: 'idle', OUT: 'out', IN: 'in' });
 const TX_TYPE = Object.freeze({ WARP: 'warp', FADE: 'fade' });
-
-const PLAYER_BTN_HALF_SPAN = PLAYER_BTN_STEP_RAD * (PLAYER_BTN_NUM - 1) / 2;
-const PLAYER_HEAD_R = PLAYER_RADIUS * PLAYER_HEAD_R_FACTOR;
-const PLAYER_HEAD_Y = PLAYER_RADIUS * PLAYER_HEAD_Y_FACTOR;
-const PLAYER_EYE_R = PLAYER_RADIUS * PLAYER_EYE_R_FACTOR;
-const COLLISION_DIST_SQ = (SPIKE_RADIUS + PLAYER_RADIUS) ** 2;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio);
@@ -505,18 +506,15 @@ const builders = {
     const body = new THREE.Group();
     body.scale.set(...ROCKET_BODY_SCALE);
 
-    const tip = mkMesh(GEO.cone(RAD, H, SEG_LO), MAT.red);
-    tip.position.y = H;
-    body.add(tip);
-    const upCyl = mkMesh(GEO.cyl(RAD, H, SEG_LO), MAT.silver);
-    upCyl.position.y = H / 2;
-    body.add(upCyl);
-    const dnCyl = mkMesh(GEO.cyl(RAD, H, SEG_LO), MAT.darkSilver);
-    dnCyl.position.y = -H / 2;
-    body.add(dnCyl);
-    const nozzle = mkMesh(GEO.cone(RAD / 2, H / 2, SEG_LO), MAT.black);
-    nozzle.position.y = -(H + RAD / 2);
-    body.add(nozzle);
+    const stack = (geo, mat, y) => {
+      const m = mkMesh(geo, mat);
+      m.position.y = y;
+      body.add(m);
+    };
+    stack(GEO.cone(RAD, H, SEG_LO), MAT.red, H);           // tip
+    stack(GEO.cyl(RAD, H, SEG_LO), MAT.silver, H / 2);     // upper body
+    stack(GEO.cyl(RAD, H, SEG_LO), MAT.darkSilver, -H / 2); // lower body
+    stack(GEO.cone(RAD / 2, H / 2, SEG_LO), MAT.black, -(H + RAD / 2)); // nozzle
 
     body.add(radialSlots(ROCKET_WING_NUM, 'y', () => {
       const wc = mkMesh(GEO.cone(RAD / 2, H / 2, SEG_LO), MAT.darkRed);
@@ -555,7 +553,7 @@ const spikes = Array.from({ length: SPIKE_NUM }, () => {
   return mesh;
 });
 
-const starMeshes = Array.from({ length: STAR_NUM }, () => {
+const stars = Array.from({ length: STAR_NUM }, () => {
   const m = builders.star();
   scene.add(m);
   return m;
@@ -567,8 +565,10 @@ let score = 0;
 let highScore = 0;
 let isGameOver = false;
 
-const player = { x: 0, y: 0, vy: 0, roll: 0, jumping: false };
-const rocket = { x: 0, y: 0, speed: 0, moving: false };
+const PLAYER_INIT = Object.freeze({ x: PLAYER_X, y: 0, vy: 0, roll: 0, jumping: false });
+const ROCKET_INIT = Object.freeze({ x: ROCKET_START_X, y: 0, speed: 0, moving: false });
+const player = { ...PLAYER_INIT };
+const rocket = { ...ROCKET_INIT };
 
 function randomizeStarYZ(m) {
   m.position.y = rand(STAR_Y_MIN, STAR_Y_MAX);
@@ -576,7 +576,7 @@ function randomizeStarYZ(m) {
 }
 
 function placeStars() {
-  for (const m of starMeshes) {
+  for (const m of stars) {
     m.position.x = rand(-WORLD_HALF, WORLD_HALF);
     randomizeStarYZ(m);
   }
@@ -623,6 +623,11 @@ const TX = {
     }
   },
 
+  _fill(color) {
+    txCtx.fillStyle = color;
+    txCtx.fillRect(0, 0, hudW, hudH);
+  },
+
   _drawWarpOut() {
     const elapsed = this.t * this.duration;
     const cx = hudW / 2;
@@ -649,8 +654,7 @@ const TX = {
     }
     const flash = easeIn2(Math.max(0, (this.t - TX_WARP_FLASH_START) / (1 - TX_WARP_FLASH_START)));
     if (flash > 0) {
-      txCtx.fillStyle = rgba(...WARP_FLASH, flash);
-      txCtx.fillRect(0, 0, hudW, hudH);
+      this._fill(rgba(...WARP_FLASH, flash));
     }
   },
 
@@ -672,15 +676,13 @@ const TX = {
       if (this.type === TX_TYPE.WARP) {
         this._drawWarpOut();
       } else {
-        txCtx.fillStyle = rgba(...FADE_BG, easeIn2(this.t));
-        txCtx.fillRect(0, 0, hudW, hudH);
+        this._fill(rgba(...FADE_BG, easeIn2(this.t)));
       }
     } else {
       const alpha = 1 - easeOut2(this.t);
-      txCtx.fillStyle = (this.type === TX_TYPE.WARP)
+      this._fill(this.type === TX_TYPE.WARP
         ? rgba(...WARP_FLASH, alpha)
-        : rgba(...FADE_BG, alpha);
-      txCtx.fillRect(0, 0, hudW, hudH);
+        : rgba(...FADE_BG, alpha));
     }
   },
 };
@@ -690,20 +692,13 @@ function switchScene(next) {
   score = 0;
   isGameOver = false;
 
-  player.x = PLAYER_X;
-  player.y = 0;
-  player.vy = 0;
-  player.roll = 0;
-  player.jumping = false;
+  Object.assign(player, PLAYER_INIT);
   spikes.forEach((m, i) => {
     m.position.x = SPIKE_INIT_X * (i + SPIKE_INIT_OFS);
   });
 
   if (next === SCENE.TITLE) {
-    rocket.x = ROCKET_START_X;
-    rocket.y = 0;
-    rocket.speed = 0;
-    rocket.moving = false;
+    Object.assign(rocket, ROCKET_INIT);
     Burst.clear();
   }
 }
@@ -739,14 +734,16 @@ function rightmostSpikeX(excludeIdx) {
 }
 
 function updateSpikes(ms) {
+  const dy = SPIKE_Y - player.y;
+  const dy2 = dy * dy;
+  const rollZ = theta * SPIKE_ROLL_RATE;
   for (let i = 0; i < SPIKE_NUM; i++) {
     const m = spikes[i];
     m.position.x -= SPIKE_SPEED * ms;
 
     if (!isGameOver) {
       const dx = m.position.x - player.x;
-      const dy = SPIKE_Y - player.y;
-      if (dx * dx + dy * dy < COLLISION_DIST_SQ) {
+      if (dx * dx + dy2 < COLLISION_DIST_SQ) {
         isGameOver = true;
         highScore = Math.max(highScore, Math.floor(score));
         shake.trigger();
@@ -758,13 +755,13 @@ function updateSpikes(ms) {
     if (m.position.x < -WORLD_HALF) {
       m.position.x = rightmostSpikeX(i) + rand(SPIKE_MIN_GAP, SPIKE_MAX_GAP);
     }
-    m.rotation.z = theta * SPIKE_ROLL_RATE;
+    m.rotation.z = rollZ;
   }
 }
 
 function updateStars(ms) {
   const spd = (gameScene === SCENE.PLAY ? STAR_SPEED_PLAY : STAR_SPEED_TITLE) * ms;
-  for (const m of starMeshes) {
+  for (const m of stars) {
     m.position.x -= spd;
     if (m.position.x < -WORLD_HALF) {
       m.position.x = rand(STAR_RESPAWN_X_MIN, STAR_RESPAWN_X_MAX);
@@ -997,10 +994,11 @@ function animate(now) {
   const inGame = gameScene === SCENE.PLAY;
   const active = inGame && !TX.isTransitioning && !isGameOver;
 
+  const spikesVisible = inGame && !TX.isTransitioning;
   groundMesh.visible = inGame;
   playerMesh.visible = inGame && !isGameOver;
   for (const m of spikes) {
-    m.visible = inGame && !TX.isTransitioning;
+    m.visible = spikesVisible;
   }
 
   if (active) {
