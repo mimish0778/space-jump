@@ -6,6 +6,10 @@ HTML ファイル 1 つで動作し、インストールやビルドは不要で
 
 **プレイ:** https://mimish0778.github.io/space-jump/
 
+| タイトル画面 | プレイ画面 |
+| --- | --- |
+| ![タイトル画面](images/title.png) | ![トゲの球が迫ってくるプレイ画面](images/gameplay.png) |
+
 ## 遊び方
 
 1. タイトル画面で、スペースキー、`↑` キー、クリック、タップのいずれかを押すと、ロケットが発進してゲームが始まります。
@@ -53,3 +57,7 @@ git clone https://github.com/mimish0778/space-jump.git
 | `SPIKE_MIN_GAP` / `SPIKE_MAX_GAP` | トゲの球どうしの間隔の最小値と最大値 |
 | `JUMP_SPEED` / `GRAVITY` | ジャンプの初速と重力 |
 | `TX_WARP_OUT_MS` / `TX_FADE_OUT_MS` | ワープとフェードの画面切り替えにかける時間 |
+
+## ライセンス
+
+[MIT License](LICENSE)
