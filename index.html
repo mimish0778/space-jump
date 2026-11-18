@@ -97,6 +97,12 @@ body { background: #000; overflow: hidden; }
   position: absolute; top: 0; left: 0;
   pointer-events: none; z-index: 20; opacity: 0;
 }
+  /* タッチ操作の端末では、キーの代わりにタップの案内を出す */
+  .tap-hint { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    .key-hint { display: none; }
+    .tap-hint { display: inline; }
+  }
 </style>
 </head>
 <body>
@@ -109,7 +115,7 @@ body { background: #000; overflow: hidden; }
     </div>
     <div id="title-prompt" class="fade">
       <div id="title-sub">Push to Start!</div>
-      <div id="title-key">&lt; Space / &uarr; &gt;</div>
+      <div id="title-key"><span class="key-hint">&lt; Space / &uarr; &gt;</span><span class="tap-hint">&lt; Tap &gt;</span></div>
     </div>
     <div id="gameover" class="fade">
       <div id="go-text">GAME OVER</div>
